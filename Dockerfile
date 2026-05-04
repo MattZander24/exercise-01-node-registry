@@ -1,14 +1,34 @@
-# TODO: Write a production-ready Dockerfile
-#
-# All of these are tested by the grader:
-#
-# [ ] Multi-stage build (2+ FROM instructions)
-# [ ] Base image: python:3.14-slim (pinned version, no :latest)
-# [ ] Copy requirements.txt and pip install BEFORE copying source code (layer caching)
-# [ ] Run as a non-root USER
-# [ ] EXPOSE 8080
-# [ ] HEALTHCHECK instruction
-# [ ] No hardcoded secrets (no ENV PASSWORD=..., no ENV SECRET_KEY=...)
-# [ ] Final image under 200MB
-#
-# Start command: uvicorn src.app:app --host 0.0.0.0 --port 8080
+# Stage 1: Builder
+FROM python:3.14-slim AS builder
+
+WORKDIR /app
+
+# Install build dependencies if needed (psycopg2-binary doesn't need many build-deps, but sometimes it's better to be safe)
+# However, psycopg2-binary is pre-compiled.
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# Stage 2: Final
+FROM python:3.14-slim
+
+# Copy installed packages from builder
+COPY --from=builder /install /usr/local
+
+WORKDIR /app
+
+# Copy source code
+COPY src/ /app/src/
+
+# Create a non-root user
+RUN useradd -m appuser && chown -R appuser:appuser /app
+USER appuser
+
+# Expose port
+EXPOSE 8080
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"
+
+# Start command
+CMD ["uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8080"]
